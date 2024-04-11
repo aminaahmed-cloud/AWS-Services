@@ -192,6 +192,186 @@ Default output format [None]:
 
 <img src="https://i.imgur.com/IovAb9f.png" height="80%" width="80%" alt="Disk Sanitization Steps"/>
 
+****
+
+# Continuous Deployment Setup Guide
 
 
+## Step 6: Add docker-compose for deployment
 
+1. **Add docker-compose to your NodeJS application:**
+   - Docker-compose allows you to define and run multi-container Docker applications. By adding a docker-compose.yml file to your project, you can specify the configuration for running your application, including any dependencies like databases or services.
+   **docker-compose.yaml:**
+
+```sh
+version: '3.8'
+services:
+    nodejs-app:
+      image: ${IMAGE}
+      ports:
+        - 3000:3000
+
+```
+
+<img src="https://i.imgur.com/kiHP1Za.png" height="80%" width="80%" alt="Disk Sanitization Steps"/>
+
+
+## Step 7: Add "deploy to EC2" step to your existing pipeline
+
+1. **Modify the Jenkinsfile:**
+   - Update the Jenkinsfile in your project to include a deployment step that deploys your application to an EC2 instance.
+
+     **Create ssh keys credentials in Jenkins**
+
+     - name the keys credentials: `ec2-server-key` and add the private ssh key from `WebServerKeyPair.pem` as its content. You will use this to ssh into the EC2 server from Jenkins
+
+       **Create server-cmds.sh file**
+
+       ```sh
+       export IMAGE=$1
+       docker-compose -f docker-compose.yaml up --detach
+       echo "success"
+       ```
+       
+<img src="https://i.imgur.com/wykE1Ym.png" height="80%" width="80%" alt="Disk Sanitization Steps"/>
+
+- Build Automation & CI/CD with Jenkins
+
+**Jenkinsfile:**
+```sh
+pipeline {
+    agent any
+    tools {
+        nodejs "node"
+    }
+    stages {
+        stage('Increment Version') {
+            // Add your commands for incrementing version
+        }
+        stage('Run Tests') {
+            // Add your commands for running tests
+        }
+        stage('Build and Push Docker Image') {
+            // Add your commands for building and pushing Docker image
+        }
+        stage('Deploy to EC2') {
+            steps {
+                script {
+                    // Define variables
+                    def shellCmd = "bash ./server-cmds.sh ${IMAGE_NAME}"
+                    def ec2Instance = "ec2-user@35.176.254.134"
+
+                    // Run SSH commands using sshagent
+                    sshagent(credentials: ['ec2-server-key']) {
+                        sh "scp -o StrictHostKeyChecking=no server-cmds.sh ${ec2Instance}:/home/ec2-user"
+                        sh "scp -o StrictHostKeyChecking=no docker-compose.yaml ${ec2Instance}:/home/ec2-user"
+                        sh "ssh -o StrictHostKeyChecking=no ${ec2Instance} ${shellCmd}"
+                    }     
+                }
+            }
+        }
+        stage('Commit Version Update') {
+            // Add your commands for committing version update
+        }
+    }     
+}
+
+```
+
+<img src="https://i.imgur.com/Ppsbhao.png" height="80%" width="80%" alt="Disk Sanitization Steps"/>
+
+
+## Step 8: Configure access from browser (EC2 Security Group)
+
+1. **Configure EC2 Security Group:**
+   - After deploying your application to the EC2 instance, you need to configure the EC2 Security Group to allow incoming traffic from the browser.
+     
+     **Open application's port 3000 in security group to make app accessible from browser**
+
+```sh
+aws ec2 authorize-security-group-ingress --group-id sg-id --protocol tcp --port 3000 --cidr 0.0.0.0/0
+
+```
+
+<img src="https://i.imgur.com/yx6dOF3.png" height="80%" width="80%" alt="Disk Sanitization Steps"/>
+
+
+## Step 9: Configure automatic triggering of multi-branch pipeline
+
+1. **Implement branch-based logic:**
+   - Modify your Jenkinsfile to include branch-based logic that controls when builds and deployments occur. For example, you may want to deploy changes only from the master branch.
+  
+   - **Add branch based logic to Jenkinsfile**
+
+```sh
+# when the current branch is master, execute all steps. If it's not master, execute only the "run tests" step
+pipeline {
+    agent any
+      tools {
+        nodejs "node"
+      }
+      stages {
+        stage('increment version') {
+          when {
+            expression {
+              return env.GIT_BRANCH == "master"
+            }
+          }
+          steps {
+            script {
+                ...  
+            }
+          }
+        }
+        stage('Run tests') {
+          steps {
+            script {
+                ...  
+            }
+          }
+        }
+        stage('Build and Push docker image') {
+          when {
+            expression {
+              return env.GIT_BRANCH == "master"
+            }
+          }
+          steps {
+            script {
+                ...  
+            }
+          }
+        }
+        stage('deploy to EC2') {
+          when {
+            expression {
+              return env.GIT_BRANCH == "master"
+            }
+          }
+          steps {
+            script {
+                ...  
+            }
+          }
+        }
+        stage('commit version update') {
+          when {
+            expression {
+              return env.GIT_BRANCH == "master"
+            }
+          }
+          steps {
+            script {
+                ...  
+            }
+          }  
+        }
+    }     
+}
+
+```
+
+
+2. **Set up webhook in GitHub:**
+   - Configure a webhook in your GitHub repository to automatically trigger the Jenkins pipeline whenever changes are pushed to the repository.
+  
